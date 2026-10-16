@@ -385,7 +385,10 @@ function ModelResults({
                   value={`${provider.slug}:${model}`}
                 >
                   <span
-                    className={cn('hover-marquee min-w-0 flex-1 truncate', dimmed && !isCurrent && 'text-muted-foreground')}
+                    className={cn(
+                      'hover-marquee min-w-0 flex-1 truncate',
+                      dimmed && !isCurrent && 'text-muted-foreground'
+                    )}
                     onPointerEnter={armMarquee}
                     onPointerLeave={disarmMarquee}
                   >
