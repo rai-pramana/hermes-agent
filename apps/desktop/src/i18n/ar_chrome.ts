@@ -354,6 +354,7 @@ export const arChrome = {
       editModels: 'تحرير النماذج',
       followDefault: 'استخدام الافتراضي من الإعدادات',
       refreshModels: 'تحديث النماذج',
+      showFullIds: 'إظهار معرّفات النماذج الكاملة',
       favorites: 'المفضلة',
       addFavorite: 'إضافة إلى المفضلة',
       removeFavorite: 'إزالة من المفضلة',

@@ -133,7 +133,7 @@ export function ModelOverrideField({
           </span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72 p-0">
+      <DropdownMenuContent align="start" className="w-96 max-w-[min(32rem,90vw)] p-0">
         <ModelMenuCloseContext.Provider value={() => setOpen(false)}>
           <ModelCatalogMenu controller={controller} />
         </ModelMenuCloseContext.Provider>

@@ -4,6 +4,7 @@ export const jaModelMenu = {
   editModels: 'モデルを編集…',
   followDefault: '設定のデフォルトを使用',
   refreshModels: 'モデルを更新',
+  showFullIds: '完全なモデルIDを表示',
   favorites: 'お気に入り',
   addFavorite: 'お気に入りに追加',
   removeFavorite: 'お気に入りから削除',

@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge'
 import { Codicon } from '@/components/ui/codicon'
 import { DisclosureCaret } from '@/components/ui/disclosure-caret'
 import {
+  DropdownMenuCheckboxItem,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -36,6 +37,7 @@ import type { HermesGateway } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { isSubmitEnter } from '@/lib/ime'
+import { armMarquee, disarmMarquee } from '@/lib/marquee'
 import { catalogProviderMatches, modelOptionsQueryKey, requestModelOptions } from '@/lib/model-options'
 import { displayModelName, modelDisplayParts } from '@/lib/model-status-label'
 import { accountResetMs, formatReset, modelResetMs } from '@/lib/provider-limit'
@@ -52,6 +54,7 @@ import {
   useLocalModelsStatus,
   useLocalRuntimeJobs
 } from '@/store/local-runtime-jobs'
+import { $showFullModelIds, setShowFullModelIds } from '@/store/model-full-ids'
 import { $showModelPricing } from '@/store/model-pricing'
 import {
   $visibleModels,
@@ -80,6 +83,7 @@ export const ModelMenuCloseContext = createContext<() => void>(() => {})
  *  provider ships it), "free", and a sale tag when the portal reports a
  *  discounted list price. Rendered only when the provider's payload carries
  *  pricing (Nous Portal and others that ship it). */
+
 function ModelPrice({ pricing }: { pricing: ModelPricing }) {
   const { t } = useI18n()
   const copy = t.shell.modelMenu
@@ -265,6 +269,10 @@ export function ModelCatalogMenu({
   // preference owned by the catalog, so the composer pill, session tiles and
   // the kanban override all show the same Favorites section.
   const favoriteKeys = useStore($favoriteModels)
+  // Raw `provider/model` ids instead of prettified names — one global
+  // preference, same reasoning as curation above: every surface that shows
+  // a catalog must show the same labels.
+  const showFullIds = useStore($showFullModelIds)
 
   const modelOptions = useQuery({
     queryKey: modelOptionsQueryKey(profile, sessionId, ownerConnectionId),
@@ -768,6 +776,7 @@ export function ModelCatalogMenu({
                     onSubOpenChange={handleSubOpenChange}
                     provider={provider}
                     search={search}
+                    showFullId={showFullIds}
                   />
                 </Fragment>
               ))}
@@ -818,6 +827,7 @@ export function ModelCatalogMenu({
                       onSubOpenChange={handleSubOpenChange}
                       provider={group.provider}
                       search={search}
+                      showFullId={showFullIds}
                     />
                   ))}
                 {!collapsed &&
@@ -895,6 +905,18 @@ export function ModelCatalogMenu({
           trailing block it has always rendered. */}
       <DropdownMenuSeparator className="mx-0" />
       {footer}
+      <DropdownMenuCheckboxItem
+        checked={showFullIds}
+        className={cn(dropdownMenuRow, 'text-(--ui-text-tertiary)')}
+        onSelect={event => {
+          // Keep the menu open: flipping the label is a view mode, not a pick.
+          event.preventDefault()
+          setShowFullModelIds(!showFullIds)
+        }}
+      >
+        <Codicon name="symbol-string" size="0.75rem" />
+        {copy.showFullIds}
+      </DropdownMenuCheckboxItem>
       <DropdownMenuItem
         className={cn(dropdownMenuRow, 'text-(--ui-text-tertiary)', slugEntry && 'text-foreground')}
         onSelect={event => {
@@ -980,6 +1002,8 @@ interface ModelFamilyRowProps {
   onSubOpenChange?: (open: boolean, key: string) => void
   provider: ModelOptionProvider
   search: string
+  /** Raw `provider/model` id instead of the prettified name (user toggle). */
+  showFullId?: boolean
 }
 
 /** One model family row: the favorite star, the trigger that commits the
@@ -997,7 +1021,8 @@ function ModelFamilyRow({
   onSelect,
   onSubOpenChange,
   provider,
-  search
+  search,
+  showFullId = false
 }: ModelFamilyRowProps): ReactElement {
   const { t } = useI18n()
   const copy = t.shell.modelMenu
@@ -1016,8 +1041,12 @@ function ModelFamilyRow({
       : null
 
   const isCurrent = activeId !== null
+  // Raw `provider/model` id the backend would send on the wire (user toggle);
+  // the prettified name stays the default everywhere else.
+  const fullId = `${provider.slug}:${family.id}`
   const { name, tag } = modelDisplayParts(family.id)
-  const decoration = useModelMenuRowDecoration({ label: name, model: family.id, provider: provider.slug })
+  const rowName = showFullId ? family.id : name
+  const decoration = useModelMenuRowDecoration({ label: rowName, model: family.id, provider: provider.slug })
   const caps = provider.capabilities?.[family.id]
   const limit = familyLimit(provider, family, isCurrent)
 
@@ -1132,10 +1161,17 @@ function ModelFamilyRow({
         </Tip>
         <span className={cn('flex min-w-0 flex-1 items-center gap-1.5', limit.tone)}>
           {decoration.icon !== undefined ? <ModelMenuRowIcon icon={decoration.icon} /> : null}
-          <span className="min-w-0 truncate">
-            <HighlightMatches foldSeparators query={search} text={name} />
+          <span
+            className={cn('hover-marquee min-w-0 truncate', showFullId && 'font-mono text-xs')}
+            onPointerEnter={armMarquee}
+            onPointerLeave={disarmMarquee}
+            title={showFullId ? fullId : undefined}
+          >
+            <span className="hover-marquee-inner">
+              <HighlightMatches foldSeparators query={search} text={showFullId ? family.id : name} />
+            </span>
           </span>
-          {tag ? <ModelChip>{tag}</ModelChip> : null}
+          {!showFullId && tag ? <ModelChip>{tag}</ModelChip> : null}
           {decoration.badge ? (
             <Badge className="shrink-0 uppercase tracking-wide" data-model-menu-row-badge="" size="xs" variant="muted">
               {decoration.badge}

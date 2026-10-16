@@ -15,6 +15,7 @@ import { useI18n } from '@/i18n'
 import { ChevronDown } from '@/lib/icons'
 import { formatModelPillLabel, providerDisplayName } from '@/lib/model-status-label'
 import { cn } from '@/lib/utils'
+import { $showFullModelIds } from '@/store/model-full-ids'
 import { $currentModelSource, setModelPickerOpen } from '@/store/session'
 
 import { useComposerModelPillLabel } from './contrib'
@@ -138,13 +139,22 @@ export function ModelPill({
   // label, custom naming) — the pill keeps its chrome, pin dot, and menu; only
   // the text changes, and a provider that declines leaves the core label.
   const pillLabel = useComposerModelPillLabel({ compact, model: currentModel, reasoningEffort: reasoningEffort || '' })
+  const showFullIds = useStore($showFullModelIds)
+
+  // Raw id (`provider/model`) instead of the prettified name — same toggle as
+  // the catalog rows, so the pill never disagrees with the menu.
+  const coreLabel = showFullIds
+    ? currentModel.trim() || formatModelPillLabel(currentModel, { fastMode, serviceTier })
+    : formatModelPillLabel(currentModel, { fastMode, serviceTier })
 
   const label = compact ? (
     <ChevronDown className="size-3.5 shrink-0 opacity-70" />
   ) : (
     <>
       {currentModel.trim() ? (
-        <span className="truncate">{pillLabel ?? formatModelPillLabel(currentModel, { fastMode, serviceTier })}</span>
+        <span className={cn(showFullIds && 'font-mono')} title={showFullIds ? currentModel.trim() : undefined}>
+          <span className="truncate">{pillLabel ?? coreLabel}</span>
+        </span>
       ) : (
         <GlyphSpinner className="opacity-50" spinner="braille" />
       )}
@@ -222,7 +232,7 @@ export function ModelPill({
       </Tip>
       <DropdownMenuContent
         align="end"
-        className="w-72 p-0"
+        className="w-96 max-w-[min(32rem,90vw)] p-0"
         onCloseAutoFocus={event => {
           if (restoreSelection.current) {
             event.preventDefault()

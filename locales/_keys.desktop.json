@@ -4109,6 +4109,7 @@
     "shell.modelMenu.refreshModels",
     "shell.modelMenu.removeFavorite",
     "shell.modelMenu.search",
+    "shell.modelMenu.showFullIds",
     "shell.modelMenu.usageLeft",
     "shell.modelMenu.usageTip",
     "shell.modelMenu.usageWindow",
