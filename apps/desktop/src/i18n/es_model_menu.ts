@@ -5,6 +5,7 @@ export const esModelMenu = {
   editModels: 'Editar modelos…',
   followDefault: 'Usar el predeterminado de Ajustes',
   refreshModels: 'Actualizar modelos',
+  showFullIds: 'Mostrar los ID completos de los modelos',
   favorites: 'Favoritos',
   addFavorite: 'Añadir a favoritos',
   removeFavorite: 'Quitar de favoritos',

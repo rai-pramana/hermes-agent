@@ -735,3 +735,39 @@ describe('the catalog renders per-model pricing', () => {
     expect(screen.queryByText('free')).toBeNull()
   })
 })
+
+describe('model row hover marquee', () => {
+  it('wraps the name in a marquee span that arms only when the text overflows', async () => {
+    renderMenu()
+
+    const nameNode = await screen.findByText(/Gemini 3\.1 Pro/i)
+    const marqueeEl = nameNode.closest('.hover-marquee') as HTMLElement | null
+
+    expect(marqueeEl).not.toBeNull()
+    expect(marqueeEl?.querySelector('.hover-marquee-inner')).not.toBeNull()
+
+    Object.defineProperty(marqueeEl!, 'scrollWidth', { configurable: true, value: 300 })
+    Object.defineProperty(marqueeEl!, 'clientWidth', { configurable: true, value: 100 })
+
+    fireEvent.pointerEnter(marqueeEl!)
+    expect(marqueeEl!.dataset.marquee).toBe('true')
+
+    fireEvent.pointerLeave(marqueeEl!)
+    expect(marqueeEl!.dataset.marquee).toBeUndefined()
+  })
+
+  it('leaves the marquee disarmed when the name fits', async () => {
+    renderMenu()
+
+    const nameNode = await screen.findByText(/Gemini 3\.1 Pro/i)
+    const marqueeEl = nameNode.closest('.hover-marquee') as HTMLElement | null
+
+    expect(marqueeEl).not.toBeNull()
+
+    Object.defineProperty(marqueeEl!, 'scrollWidth', { configurable: true, value: 100 })
+    Object.defineProperty(marqueeEl!, 'clientWidth', { configurable: true, value: 100 })
+
+    fireEvent.pointerEnter(marqueeEl!)
+    expect(marqueeEl!.dataset.marquee).toBeUndefined()
+  })
+})

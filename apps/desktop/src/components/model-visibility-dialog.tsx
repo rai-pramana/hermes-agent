@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch'
 import type { HermesGateway } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { Plus, Search, X } from '@/lib/icons'
+import { armMarquee, disarmMarquee } from '@/lib/marquee'
 import { modelOptionsQueryKey, requestModelOptions } from '@/lib/model-options'
 import { displayModelName, modelDisplayParts } from '@/lib/model-status-label'
 import { foldIncludes, normalize } from '@/lib/text'
@@ -27,6 +28,7 @@ import {
   resetModelVisibilityKeepingCustoms,
   withCustomModels
 } from '@/store/custom-models'
+import { $showFullModelIds } from '@/store/model-full-ids'
 import {
   $visibleModels,
   collapseModelFamilies,
@@ -64,6 +66,7 @@ export function ModelVisibilityDialog({
   const stored = useStore($visibleModels)
   const collapsedProviders = useStore($collapsedProviders)
   const customModels = useStore($customModels)
+  const showFullIds = useStore($showFullModelIds)
 
   const modelOptions = useQuery({
     queryKey: modelOptionsQueryKey(profile, sessionId, ownerConnectionId),
@@ -187,15 +190,22 @@ export function ModelVisibilityDialog({
                     models.map(family => {
                       const { name, tag } = modelDisplayParts(family.id)
                       const key = modelVisibilityKey(provider.slug, family.id)
+                      const rowText = showFullIds ? family.id : name
 
                       return (
                         <label
                           className="flex cursor-pointer items-center gap-2 px-3 py-1 text-xs hover:bg-(--ui-control-active-background)"
                           key={key}
                         >
-                          <span className="min-w-0 flex-1 truncate">
-                            <HighlightMatches foldSeparators query={search} text={name} />
-                            {tag ? <span className="text-(--ui-text-tertiary)"> {tag}</span> : null}
+                          <span
+                            className="hover-marquee min-w-0 flex-1 truncate"
+                            onPointerEnter={armMarquee}
+                            onPointerLeave={disarmMarquee}
+                          >
+                            <span className="hover-marquee-inner">
+                              <HighlightMatches foldSeparators query={search} text={rowText} />
+                            </span>
+                            {!showFullIds && tag ? <span className="text-(--ui-text-tertiary)"> {tag}</span> : null}
                           </span>
                           {isCustomModel(customModels, provider.slug, family.id) && (
                             <Button
