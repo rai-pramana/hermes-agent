@@ -35,7 +35,7 @@ from agent.error_classifier import (
 )
 from agent.auxiliary_managed_local import _is_managed_local_endpoint
 from agent.auxiliary_reasoning_floor import remember_reasoning_floor, with_reasoning_floor
-from agent.auxiliary_structured_output import _route_key, remember_structured_output_rejection
+from agent.auxiliary_structured_output import _route_key, _without_structured_output_format, remember_structured_output_rejection
 from agent.codex_headers import (
     CODEX_AUX_BASE_URL as _CODEX_AUX_BASE_URL,
     apply_required_codex_headers as _apply_required_codex_headers,
@@ -120,6 +120,7 @@ def aux_probe_mode():
 
 
 from agent.credential_pool import load_pool
+from agent.custom_entry_pool import entry_scoped_pool, pool_for_aux_provider
 from agent.model_metadata import MINIMUM_CONTEXT_LENGTH, get_model_context_length
 from hermes_cli.config import get_hermes_home
 from hermes_cli.config_providers import _canonical_api_mode
@@ -3416,22 +3417,6 @@ def _is_structured_output_rejection(exc: Exception) -> bool:
     return _is_unsupported_parameter_error(exc, "response_format") or _is_unsupported_parameter_error(exc, "output_config")
 
 
-def _without_structured_output_format(kwargs: dict) -> Optional[dict]:
-    """Copy *kwargs* without ``response_format`` (top-level and ``extra_body``); None when nothing was
-    removed, so call sites don't retry an unchanged request."""
-    retry_kwargs = dict(kwargs)
-    changed = retry_kwargs.pop("response_format", None) is not None
-    extra_body = retry_kwargs.get("extra_body")
-    if isinstance(extra_body, dict) and "response_format" in extra_body:
-        remaining = {k: v for k, v in extra_body.items() if k != "response_format"}
-        if remaining:
-            retry_kwargs["extra_body"] = remaining
-        else:
-            retry_kwargs.pop("extra_body", None)
-        changed = True
-    return retry_kwargs if changed else None
-
-
 def _is_reasoning_field_rejection(exc: Exception) -> bool:
     """Provider 400 rejecting a reasoning wire control by name (``reasoning_effort``, ``reasoning``,
     ``thinking``/``think``). Chat-only models behind OpenAI-compatible relays reject the top-level
@@ -3699,8 +3684,8 @@ def _recoverable_pool_provider(
                     "endpoint mismatch, not a dead key; skipping credential rotation",
                     normalized, base_url_hostname(base), base_url_hostname(rt_base))
         return None
-    if normalized not in {"", "auto", "custom"}:
-        return normalized
+    if normalized not in {"", "auto", "custom"}:  # a pinned ``custom:<name>`` keeps its entry's identity
+        return pinned if (pinned := str(resolved_provider or "").strip().lower()).startswith("custom:") else normalized
     known = _provider_for_host(base, _POOL_PROVIDER_BY_HOST)
     if known is not None:
         return known
@@ -3731,7 +3716,7 @@ def _recover_provider_pool(provider: str, exc: Exception, *, failed_api_key: str
     """
     normalized = _normalize_aux_provider(provider)
     try:
-        pool = load_pool(normalized)
+        pool = pool_for_aux_provider(provider, normalized, load_pool)
     except Exception as load_exc:
         logger.debug("Auxiliary client: could not load pool for %s recovery: %s", normalized, load_exc)
         return False
@@ -3818,10 +3803,12 @@ def _retry_same_provider_sync(*, resolved_provider: str, resolved_api_mode: Opti
 
 
 async def _retry_same_provider_async(*, resolved_provider: str, resolved_api_mode: Optional[str], task: Optional[str], **prep) -> Any:
+    import asyncio
     retry_client, retry_kwargs = _prepare_same_provider_retry(
         task=task, resolved_provider=resolved_provider, resolved_api_mode=resolved_api_mode, async_mode=True, **prep,
     )
-    return _validate_llm_response(
+    return await asyncio.to_thread(
+        _validate_llm_response,
         await _relay_async_completion(retry_client, retry_kwargs, provider=resolved_provider, api_mode=resolved_api_mode),
         task,
     )
@@ -4021,13 +4008,13 @@ def _fallback_destination(
 def _replan_synchronous_cache_sections(
     messages: list, tools: Optional[list], *, destination: _FallbackDestination
 ) -> tuple[list, list]:
-    """Strip source decoration and plan one synchronous destination locally."""
+    """Plan one destination at the configured TTL (1h must not regress to 5m); one-shots never cache."""
     from agent.agent_runtime_helpers import configured_cache_ttl, plan_cache_sections_for_destination
+    from agent.prompt_caching import is_one_shot_request
     return plan_cache_sections_for_destination(
         messages, tools, provider=destination.provider, base_url=destination.base_url,
-        api_mode=destination.api_mode or "", model=destination.model or "",
-        # Operator's configured TTL so fallbacks don't regress 1h → 5m default (no live agent here; read config).
-        cache_ttl=configured_cache_ttl(),
+        api_mode=destination.api_mode or "", model=destination.model or "", cache_ttl=configured_cache_ttl(),
+        cache_disabled=True if is_one_shot_request(messages, tools) else None,
     )
 
 
@@ -4205,7 +4192,9 @@ async def _call_fallback_candidate_async(
     )
 
     async def _send(client: Any, request_kwargs: dict[str, Any], dest: _FallbackDestination) -> Any:
-        return _validate_llm_response(
+        import asyncio
+        return await asyncio.to_thread(
+            _validate_llm_response,
             await _relay_async_completion(client, request_kwargs, provider=dest.provider, api_mode=dest.api_mode),
             task,
         )
@@ -4795,10 +4784,9 @@ def _named_custom_api_key(custom_entry: dict[str, Any], provider: str, custom_ba
                     pool = load_pool(pool_key)
                 except Exception:
                     continue
-                if not pool.has_credentials():
+                if (pool := entry_scoped_pool(pool, pool_key, custom_entry)) is None or not pool.has_credentials():
                     continue
-                pool_entry = pool.select()
-                if pool_entry is None:
+                if (pool_entry := pool.select()) is None:
                     continue
                 pool_api_key = getattr(pool_entry, "runtime_api_key", None) or getattr(pool_entry, "access_token", "") or ""
                 if str(pool_api_key).strip():
@@ -5123,11 +5111,11 @@ def _resolve_custom_branch(req: _ResolveRequest) -> _ResolveResult:
         final_model = _normalize_resolved_model(
             model or (main_runtime.get("model") if main_runtime else None) or "gpt-4o-mini", provider,
         )
-        extra = {}
         _clean_base, _dq = _extract_url_query_params(custom_base)
-        if _dq:
-            extra["default_query"] = _dq
-        _custom_headers = _endpoint_default_headers(custom_base, provider, is_vision=req.is_vision)
+        extra = {"default_query": _dq} if _dq else {}
+        from hermes_cli.config import get_custom_provider_extra_headers  # this endpoint's entry, as agent_init
+        _custom_headers = {**(_endpoint_default_headers(custom_base, provider, is_vision=req.is_vision) or {}),
+                           **get_custom_provider_extra_headers(custom_base)}
         if _custom_headers:
             extra["default_headers"] = _custom_headers
         client = _create_openai_client(api_key=custom_key, base_url=_clean_base, **extra)
@@ -6057,11 +6045,11 @@ def _get_cached_client(
             del _client_cache[cache_key]
     # Build outside the lock. For pool-backed providers derive the key from the pool entry:
     # resolve_api_key_provider_credentials prefers env vars, which would bypass pool rotation
-    # and retry an exhausted key.
+    # and retry an exhausted key. A pinned ``custom:<name>`` peeks only its entry's rows.
     effective_api_key = api_key
     if not effective_api_key:
-        _pe = _peek_pool_entry(_normalize_aux_provider(provider))
-        if _pe is not None:
+        _pool = pool_for_aux_provider(provider, _normalize_aux_provider(provider), lambda k: _load_pool_with_credentials(k, " (peek)"))
+        if _pool is not None and (_pe := _peek_pool_entry(provider, _pool)) is not None:
             effective_api_key = _pool_runtime_api_key(_pe) or api_key
     client, default_model = resolve_provider_client(
         provider, model, async_mode, explicit_base_url=base_url, explicit_api_key=effective_api_key,
@@ -6817,7 +6805,8 @@ def _validate_llm_response(
     """Validate the .choices[0].message shape (fail fast, not a downstream AttributeError).
 
     Also the single aux-usage accounting chokepoint: every successful non-streaming response
-    passes here exactly once; *provider*/*base_url* are optional hints.
+    passes here exactly once; *provider*/*base_url* are optional hints. Async callers
+    await this off-loop because accounting may commit through synchronous worker RPC.
 
     See #7264.
     Recording is best-effort and never affects validation. *provider*/*base_url* are optional accounting
@@ -8371,7 +8360,9 @@ async def _async_call_llm_impl(
             return await _acreate_with_progress(client, _kwargs, task, force_stream=_force_stream_async)
 
         async def _primary(**validate_kw: Any) -> Any:
-            return _validate_llm_response(
+            import asyncio
+            return await asyncio.to_thread(
+                _validate_llm_response,
                 await _relay_async_completion(
                     client, kwargs, provider=request_provider, api_mode=req.resolved_api_mode,
                     create=_acreate),
@@ -8389,7 +8380,8 @@ async def _async_call_llm_impl(
         async def _perform(step: _LadderStep) -> Any:
             kind, args, kw = _ladder_step_call(step, req, retry_kwargs, candidate_kwargs)
             if kind == "call":
-                return _validate_llm_response(await _relay_async_completion(*args, **kw), task)
+                import asyncio
+                return await asyncio.to_thread(_validate_llm_response, await _relay_async_completion(*args, **kw), task)
             if kind == "retry":
                 return await _retry_same_provider_async(**kw)
             fb_client, fb_model, fb_label = args

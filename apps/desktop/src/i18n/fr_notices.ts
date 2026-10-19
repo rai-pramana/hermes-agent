@@ -1,4 +1,5 @@
 import type { TranslationOverrides } from './define-locale'
+import { frDesktopCommands } from './fr_desktop_commands'
 import { frSessionCommands } from './fr_session_commands'
 
 // Shell notices (remote-display toast, butterbar, keep-awake offer), spread into fr.ts.
@@ -20,7 +21,15 @@ export const frNotices = {
   promptNotices: {
     legacySendUnconfirmed:
       "Ce serveur n'a pas pu confirmer l'envoi précédent de ce message ; il a peut-être déjà été exécuté. Vérifiez la conversation avant de le renvoyer.",
-    sessionCommands: frSessionCommands
+    mcpReloadDeferred:
+      'Cette discussion est occupée : la modification MCP s’applique à la fin de son tour et au prochain rechargement MCP, ou à la réouverture de la discussion',
+    mcpReloadNotInChat: server => `${server} n’est pas activé dans cette discussion`,
+    mcpReloadUnavailable: servers => `Connexion impossible : ${servers}`,
+    compactedTurnUnavailable:
+      'Ce message a été résumé lors de la compression de la conversation : il ne peut plus être restauré ni modifié.',
+    staleTurnUnavailable: 'Ce message ne fait plus partie de l’historique de cette discussion.',
+    sessionCommands: frSessionCommands,
+    desktopCommands: frDesktopCommands
   },
   keepAwakeOffer: {
     title: 'Votre ordinateur s’est mis en veille pendant que Hermes travaillait',

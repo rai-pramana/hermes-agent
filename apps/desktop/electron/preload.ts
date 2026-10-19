@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   // Registry-scoped fresh WS URL: { connectionId, profile } → result shape of
   // getGatewayWsUrl, minted against that connection's backend.
   getGatewayWsUrlFor: payload => ipcRenderer.invoke('hermes:gateway:ws-url-for', payload),
+  // { connectionId, profile, pluginId, path } → one-use local plugin socket URL, null, or { refused: 'permission' }.
+  getPluginWsUrl: payload => ipcRenderer.invoke('hermes:plugin:ws-url', payload),
   // Union agent roster across every registered connection.
   getAgentRoster: () => ipcRenderer.invoke('hermes:agents:roster'),
   openSessionWindow: (sessionId, opts) => ipcRenderer.invoke('hermes:window:openSession', sessionId, opts),
@@ -349,6 +351,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   readPluginSource: (filePath: string) => ipcRenderer.invoke('hermes:readPluginSource', filePath),
   selectPaths: options => ipcRenderer.invoke('hermes:selectPaths', options),
   selectSavePath: options => ipcRenderer.invoke('hermes:selectSavePath', options),
+  saveTextFileAs: request => ipcRenderer.invoke('hermes:saveTextFileAs', request),
   writeClipboard: text => ipcRenderer.invoke('hermes:writeClipboard', text),
   readClipboard: () => ipcRenderer.invoke('hermes:readClipboard'),
   saveGatewayFile: payload => ipcRenderer.invoke('hermes:saveGatewayFile', payload),

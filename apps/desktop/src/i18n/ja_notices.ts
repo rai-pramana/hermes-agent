@@ -1,4 +1,5 @@
 import type { TranslationOverrides } from './define-locale'
+import { jaDesktopCommands } from './ja_desktop_commands'
 import { jaSessionCommands } from './ja_session_commands'
 
 // Shell notices (remote-display toast, butterbar, keep-awake offer), spread into ja.ts.
@@ -20,7 +21,14 @@ export const jaNotices = {
   promptNotices: {
     legacySendUnconfirmed:
       'このサーバーはこのメッセージの前回の送信を確認できなかったため、すでに実行された可能性があります。再送信する前に会話を確認してください。',
-    sessionCommands: jaSessionCommands
+    mcpReloadDeferred:
+      'このチャットは処理中です。MCP の変更は現在のターンが終わって MCP を再読み込みしたとき、またはチャットを開き直したときに反映されます',
+    mcpReloadNotInChat: server => `${server} はこのチャットでは有効になっていません`,
+    mcpReloadUnavailable: servers => `接続できませんでした: ${servers}`,
+    compactedTurnUnavailable: 'このメッセージはチャットの圧縮時に要約されたため、復元や編集はできなくなりました。',
+    staleTurnUnavailable: 'このメッセージはこのチャットの履歴にはもうありません。',
+    sessionCommands: jaSessionCommands,
+    desktopCommands: jaDesktopCommands
   },
   keepAwakeOffer: {
     title: 'Hermes の作業中にコンピューターがスリープしました',

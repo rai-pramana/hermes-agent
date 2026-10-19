@@ -43,6 +43,7 @@ from agent.session_activity import ActivityProvenance, normalize_activity_proven
 from agent.usage_anchor import set_usage_anchor
 from hermes_state_ids import new_session_id as mint_session_id
 from hermes_state_pidns import holder_namespace_token
+from agent.conversation_compression_watermark import held_archive_watermark
 
 logger = logging.getLogger(__name__)
 
@@ -501,20 +502,6 @@ class CompressionCommitFence:
         if seconds <= 0:
             raise ValueError("total compression ceiling must be positive")
         self._deadline = time.monotonic() + seconds
-
-    def extend_deadline(self, seconds: float) -> bool:
-        """Push the armed deadline back by *seconds* (time llama-server spent reading the prompt). A cancelled
-        attempt or a passed deadline stays final, so a late progress chunk can't revive it; while a commit or a
-        cancellation holds the lock there is nothing to extend."""
-        if seconds <= 0 or not self._lock.acquire(blocking=False):
-            return False
-        try:
-            alive = self._deadline is not None and self._deadline > time.monotonic() and not self.is_cancelled
-            if alive:
-                self._deadline += seconds
-            return alive
-        finally:
-            self._lock.release()
 
     def set_precommit_deadline_monotonic(self, deadline: float) -> None:
         """Arm one absolute pre-commit deadline shared across route attempts (primary + stall retry)."""
@@ -3233,18 +3220,6 @@ def _carry_session_state_to_child(agent: Any, old_session_id: str, old_title: An
     # /goal, /heartbeat, /loop: carried locally, or atomically by the owner on a RuntimeSessionStore.
     from agent.compression_automation import carry_compression_automation
     carry_compression_automation(agent, old_session_id)
-    with _swallow('Could not migrate goal on compression: %s'):
-        # Carry a persistent /goal onto the continuation session. Compression mints a fresh child id;
-        # load_goal does a flat per-session lookup with no parent walk, so without this an active goal
-        # silently dies at the boundary (#33618).
-        from hermes_cli.goals import migrate_goal_to_session
-        migrate_goal_to_session(old_session_id, agent.session_id, reason="compression")
-    with _swallow('Could not migrate heartbeat on compression: %s'):
-        from hermes_cli.heartbeat import migrate_heartbeat_to_session
-        migrate_heartbeat_to_session(old_session_id, agent.session_id)
-    with _swallow('Could not migrate loop on compression: %s'):
-        from hermes_cli.loops import migrate_loop_to_session
-        migrate_loop_to_session(old_session_id, agent.session_id, reason="compression")
     with _swallow('Could not carry rejected thinking on compression: %s'):
         from agent.anthropic_thinking_replay import carry_rejected_thinking_to_session
         carry_rejected_thinking_to_session(agent, old_session_id)
@@ -3580,63 +3555,6 @@ class _CommitOutcome:
 def _held_watermark(agent: Any, watermark: Optional[int], messages: list, verbatim_tail: Optional[list]) -> Optional[int]:
     """The in-place commit's cap; see :func:`held_archive_watermark`."""
     return held_archive_watermark(agent._session_db, agent.session_id, watermark, messages, verbatim_tail)
-
-
-def held_archive_watermark(
-    session_db: Any, session_id: str, watermark: Optional[int], messages: list, verbatim_tail: Optional[list] = None,
-    *, stale_raises: bool = False,
-) -> Optional[int]:
-    """The in-place archive watermark, capped at the newest durable row the compressor was handed.
-
-    The lease watermark is the newest row in state.db, but a surface compacts the history it holds, and that
-    can be older: a Desktop/TUI or CLI ``/compress`` does not hold turns another surface appended to the same
-    session since it loaded. Archived under the watermark, those rows would leave every surface's
-    history and search, and the summary never saw them. Above the cap they take the concurrent-append path
-    instead (cloned after the compacted set).
-
-    Only while the held history is a live prefix of the session: its LAST row names an exact ``_row_id``, and
-    that row is still active (after another surface compacted, the held rows are archived and every live row
-    would be cloned beside the new summary). An id is exact while its dict is unchanged since it was loaded: a
-    dict loaded from the DB is born carrying both the id and the persist marker, and a pass that rewrote its
-    content drops the marker and keeps the id (the user/assistant merges in ``repair_message_sequence``, or a
-    context engine that rewrites in place). Such a row absorbed later durable rows whose ids are gone from the
-    held set, so its id no longer names what the summary covered: capped there, those rows would be cloned
-    live beside a summary that already contains them. A trailing row of unknown provenance may be durable
-    under the lease watermark without any stamp (the TUI model-switch marker, written with a bare
-    ``append_message``); capped below it, the clone would land beside its own carried copy. A ``here N`` tail
-    is marker-swept copies, so ``compress_now`` keeps a copy's id only when its source still carried the
-    marker; their ids are trusted as given.
-
-    *stale_raises*: the newest exact held row being inactive means another compaction already committed.
-    Under the in-place lease that cannot overlap a live compaction, so the lease watermark is returned; a
-    lease-less caller (prune, micro-compaction) passes ``True`` and gets :class:`StaleHeldHistory` instead,
-    because for it the fallback would publish a stale generation beside the winner.
-    """
-    if watermark is None:
-        return None
-    from agent.context_compressor import _DB_PERSISTED_MARKER, StaleHeldHistory
-
-    def _exact_id(m: dict, copied: bool) -> Optional[int]:
-        rid = m.get("_row_id")
-        if not isinstance(rid, int) or isinstance(rid, bool) or rid <= 0:
-            return None
-        return rid if copied or m.get(_DB_PERSISTED_MARKER) else None
-
-    ids = [_exact_id(m, False) for m in messages if isinstance(m, dict)]
-    ids += [_exact_id(m, True) for m in (verbatim_tail or ()) if isinstance(m, dict)]
-    held = [rid for rid in ids if rid is not None]
-    if not ids or ids[-1] is None:
-        return watermark
-    newest_held = max(held)
-    # A lease-less caller checks liveness even when nothing was appended: a commit-time re-check against a
-    # watermark read before the slow step never sees newest_held < watermark, yet the winner may have landed.
-    if newest_held >= watermark and not stale_raises:
-        return watermark
-    if session_db.get_message_role(session_id, newest_held) is None:
-        if stale_raises:
-            raise StaleHeldHistory(f"held row {newest_held} of session {session_id} is no longer active")
-        return watermark
-    return min(newest_held, watermark)
 
 
 _ATTEMPT_TELEMETRY_FIELDS = (

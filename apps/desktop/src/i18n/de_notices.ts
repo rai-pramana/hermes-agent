@@ -1,3 +1,4 @@
+import { deDesktopCommands } from './de_desktop_commands'
 import { deSessionCommands } from './de_session_commands'
 import type { TranslationOverrides } from './define-locale'
 
@@ -20,7 +21,15 @@ export const deNotices = {
   promptNotices: {
     legacySendUnconfirmed:
       'Dieser Server konnte das frühere Senden dieser Nachricht nicht bestätigen; sie wurde möglicherweise bereits ausgeführt. Prüfe die Unterhaltung, bevor du sie erneut sendest.',
-    sessionCommands: deSessionCommands
+    mcpReloadDeferred:
+      'Dieser Chat ist beschäftigt: Die MCP-Änderung gilt, sobald sein Durchlauf endet und MCP erneut geladen wird, oder wenn du den Chat wieder öffnest',
+    mcpReloadNotInChat: server => `${server} ist in diesem Chat nicht aktiviert`,
+    mcpReloadUnavailable: servers => `Keine Verbindung: ${servers}`,
+    compactedTurnUnavailable:
+      'Diese Nachricht wurde beim Komprimieren des Chats zusammengefasst und kann nicht mehr wiederhergestellt oder bearbeitet werden.',
+    staleTurnUnavailable: 'Diese Nachricht ist nicht mehr im Verlauf dieses Chats.',
+    sessionCommands: deSessionCommands,
+    desktopCommands: deDesktopCommands
   },
   keepAwakeOffer: {
     title: 'Ihr Computer ist eingeschlafen, während Hermes gearbeitet hat',
