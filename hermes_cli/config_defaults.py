@@ -850,9 +850,9 @@ DEFAULT_CONFIG = {
         # continues, Shift+Enter reported distinctly. False restores the c-j submit fallback for
         # POSIX PTYs whose plain Enter arrives as LF.
         "cli_multiline_shortcuts": True,
-        # Interface bare `hermes`/`hermes chat` launches: "cli" (prompt_toolkit REPL) | "tui" (Ink).
-        # Flags win: `--cli` forces the REPL, `--tui` / HERMES_TUI=1 forces the TUI.
-        "interface": "cli",
+        # `hermes`/`hermes chat` launches "cli" (prompt_toolkit REPL) | "tui" (Ink); --cli, --tui, HERMES_TUI=1 win.
+        # cli_layout = the REPL's look: "modern" (glyph rows, status under the composer) | "classic" (boxed panels).
+        "interface": "cli", "cli_layout": "modern",
         # Native TUI uses the terminal's primary buffer and scrollback instead of the custom
         # alternate-screen viewport. Flags win: `--native` / `--tui-native` and `--cli`.
         "tui_native": False,
@@ -2932,7 +2932,7 @@ OPTIONAL_ENV_VARS = {
         tools=["browser_navigate", "browser_click"], advanced=True),
     "FAL_KEY": _tool("FAL API key for image and video generation", "FAL API key", "https://fal.ai/",
         tools=["image_generate", "video_generate"]),
-    "KREA_API_KEY": _tool("Krea API key for Krea 2 image generation (Medium + Large)",
+    "KREA_API_KEY": _tool("Krea API key for Krea 3 and Krea 2 image generation",
         "Krea API key", "https://www.krea.ai/settings/api-tokens", tools=["image_generate"]),
     "VOICE_TOOLS_OPENAI_KEY": _tool(
         "OpenAI API key for voice transcription (Whisper) and OpenAI TTS",
