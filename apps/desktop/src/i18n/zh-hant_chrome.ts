@@ -255,7 +255,6 @@ export const zhHantChrome = {
       editModels: '編輯模型…',
       followDefault: '使用設定中的預設模型',
       refreshModels: '重新整理模型',
-      showFullIds: '顯示完整模型 ID',
       favorites: '我的最愛',
       addFavorite: '加入我的最愛',
       removeFavorite: '從我的最愛移除',
@@ -422,6 +421,7 @@ export const zhHantChrome = {
   },
 
   rightSidebar: {
+    terminalDropUnquotable: (shell, paths) => `無法在 ${shell} 中安全地輸入這些名稱：${paths}`,
     terminalReadOnly: '唯讀輸出',
     terminalReadOnlyHelp:
       '如需回應提示，請停止背景命令，再於新終端機中執行。新終端機會開啟獨立的 shell，不會連線至此程序。',
@@ -466,6 +466,14 @@ export const zhHantChrome = {
     terminalNew: '新增終端機',
     terminalCloseOthers: '關閉其他',
     terminalCloseAll: '全部關閉',
+    terminalNewOn: '新增終端機於…',
+    terminalGatewayRemoved: '已移除的閘道',
+    terminalGatewayRemovedBody:
+      '此終端機所在的閘道已被移除，無法重新開啟。請關閉此分頁。',
+    terminalGatewayNoShellBody:
+      '此閘道不提供 Shell 存取，此終端機無法重新開啟。請關閉此分頁。',
+    terminalDisconnectedBody:
+      '終端機已中斷連線。按 Enter 啟動新的 shell；捲動記錄會保留。',
     addToChat: '新增至聊天'
   },
 
@@ -511,7 +519,8 @@ export const zhHantChrome = {
     saveApply: '儲存並套用',
     notExpressible: '此排列互相咬合（風車形）——暫時無法表示為巢狀分割',
     zoneCount: count => `${count} 個區域`,
-    tabCount: count => `${count} 個分頁`
+    tabCount: count => `${count} 個分頁`,
+    tabActions: title => `${title} 的動作`
   },
 
   contextMenu: {

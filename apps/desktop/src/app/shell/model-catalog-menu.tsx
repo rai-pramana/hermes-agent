@@ -1,5 +1,12 @@
 import type { ModelOptionProvider, ModelOptionsResult, ModelPricing } from '@hermes/shared'
-import { DEFAULT_REASONING_EFFORT } from '@hermes/shared'
+import {
+  DEFAULT_REASONING_EFFORT,
+  planBlocks,
+  sectionAt,
+  splitRecommended,
+  usageLevel,
+  usageTag
+} from '@hermes/shared'
 import { useStore } from '@nanostores/react'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -14,12 +21,12 @@ import {
   useState
 } from 'react'
 
+import { PlanLimitLine, UsageLevelTag } from '@/components/model-picker'
 import { ProviderStatusChip } from '@/components/provider-status-chip'
 import { Badge } from '@/components/ui/badge'
 import { Codicon } from '@/components/ui/codicon'
 import { DisclosureCaret } from '@/components/ui/disclosure-caret'
 import {
-  DropdownMenuCheckboxItem,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -37,7 +44,6 @@ import type { HermesGateway } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { isSubmitEnter } from '@/lib/ime'
-import { armMarquee, disarmMarquee } from '@/lib/marquee'
 import { catalogProviderMatches, modelOptionsQueryKey, requestModelOptions } from '@/lib/model-options'
 import { displayModelName, modelDisplayParts } from '@/lib/model-status-label'
 import { accountResetMs, formatReset, modelResetMs } from '@/lib/provider-limit'
@@ -54,7 +60,6 @@ import {
   useLocalModelsStatus,
   useLocalRuntimeJobs
 } from '@/store/local-runtime-jobs'
-import { $showFullModelIds, setShowFullModelIds } from '@/store/model-full-ids'
 import { $showModelPricing } from '@/store/model-pricing'
 import {
   $visibleModels,
@@ -83,7 +88,6 @@ export const ModelMenuCloseContext = createContext<() => void>(() => {})
  *  provider ships it), "free", and a sale tag when the portal reports a
  *  discounted list price. Rendered only when the provider's payload carries
  *  pricing (Nous Portal and others that ship it). */
-
 function ModelPrice({ pricing }: { pricing: ModelPricing }) {
   const { t } = useI18n()
   const copy = t.shell.modelMenu
@@ -236,6 +240,7 @@ function useDownloadRows(owner: LocalModelsOwner, localModelsEnabled: boolean) {
  * plugin surfaces that pick a model without a session behind it — so the two
  * can never drift apart.
  */
+// health: allow CC -- usage-window plans: section headings and the limit line in the existing list render; this component was over target on main
 export function ModelCatalogMenu({
   controller,
   footer,
@@ -269,17 +274,15 @@ export function ModelCatalogMenu({
   // preference owned by the catalog, so the composer pill, session tiles and
   // the kanban override all show the same Favorites section.
   const favoriteKeys = useStore($favoriteModels)
-  // Raw `provider/model` ids instead of prettified names — one global
-  // preference, same reasoning as curation above: every surface that shows
-  // a catalog must show the same labels.
-  const showFullIds = useStore($showFullModelIds)
 
   const modelOptions = useQuery({
     queryKey: modelOptionsQueryKey(profile, sessionId, ownerConnectionId),
     // Gateway-first even with no session: a connected (possibly remote)
     // gateway owns the model catalog, including virtual providers the local
     // REST fallback can't know about (#53817).
-    queryFn: (): Promise<ModelOptionsResult> => requestModelOptions({ gateway, profile, request, sessionId })
+    queryFn: (): Promise<ModelOptionsResult> => requestModelOptions({ gateway, profile, request, sessionId }),
+    refetchOnMount: query => nousRefetchOnMount(query.state.data),
+    refetchInterval: query => nousPricingPoll(query.state.data, query.state.dataUpdateCount)
   })
 
   const loading = modelOptions.isPending && !modelOptions.data
@@ -670,12 +673,18 @@ export function ModelCatalogMenu({
     })
   }
 
-  // Keep the selected row in view while arrowing through the scrollable list.
+  // Keep the selected row in view while arrowing through the scrollable list. Window plans open at
+  // the top (their Recommended picks); the current row stays highlighted and is scrolled to once the
+  // user arrows or searches. Every other account keeps opening on the current model.
   const listRef = useRef<HTMLDivElement>(null)
+  const opensAtTop = Boolean(providers?.some(p => p.plan_usage))
+  const followKb = !opensAtTop || kbOverride !== null || Boolean(q)
 
   useEffect(() => {
-    listRef.current?.querySelector('[data-kb-active]')?.scrollIntoView({ block: 'nearest' })
-  }, [kbActiveKey])
+    if (followKb) {
+      listRef.current?.querySelector('[data-kb-active]')?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [followKb, kbActiveKey])
 
   const kbRowProps = (key: string) => {
     const active = kbActiveKey === key
@@ -776,7 +785,6 @@ export function ModelCatalogMenu({
                     onSubOpenChange={handleSubOpenChange}
                     provider={provider}
                     search={search}
-                    showFullId={showFullIds}
                   />
                 </Fragment>
               ))}
@@ -812,23 +820,31 @@ export function ModelCatalogMenu({
                   />
                   <ProviderStatusChip className="ml-auto mr-0.5" provider={group.provider} />
                 </DropdownMenuItem>
+                {/* Window plans past an allowance: one line saying what happens next (pay as you go
+                    or wait for the reset) instead of a note on every row. */}
+                {!collapsed && !search ? <PlanLimitLine className="px-2 pb-1" provider={group.provider} /> : null}
                 {!collapsed &&
-                  group.families.map(family => (
-                    <ModelFamilyRow
-                      controller={controller}
-                      current={current}
-                      defaultEffort={defaultEffort}
-                      family={family}
-                      favorite={favoriteSet.has(favoriteModelKey(group.provider.slug, family.id))}
-                      kbProps={kbRowProps(`${group.provider.slug}:${family.id}`)}
-                      key={`${group.provider.slug}:${family.id}`}
-                      loadingModels={loadingModels}
-                      onSelect={selectFamily}
-                      onSubOpenChange={handleSubOpenChange}
-                      provider={group.provider}
-                      search={search}
-                      showFullId={showFullIds}
-                    />
+                  group.families.map((family, familyIdx) => (
+                    <Fragment key={`${group.provider.slug}:${family.id}`}>
+                      {!search && sectionTitle(group, familyIdx, copyPicker) ? (
+                        <DropdownMenuLabel className="px-2 pb-0.5 pt-1.5 text-[0.6rem] font-medium uppercase tracking-wide text-(--ui-text-tertiary)">
+                          {sectionTitle(group, familyIdx, copyPicker)}
+                        </DropdownMenuLabel>
+                      ) : null}
+                      <ModelFamilyRow
+                        controller={controller}
+                        current={current}
+                        defaultEffort={defaultEffort}
+                        family={family}
+                        favorite={favoriteSet.has(favoriteModelKey(group.provider.slug, family.id))}
+                        kbProps={kbRowProps(`${group.provider.slug}:${family.id}`)}
+                        loadingModels={loadingModels}
+                        onSelect={selectFamily}
+                        onSubOpenChange={handleSubOpenChange}
+                        provider={group.provider}
+                        search={search}
+                      />
+                    </Fragment>
                   ))}
                 {!collapsed &&
                   slug === LOCAL_PROVIDER_SLUG &&
@@ -905,18 +921,6 @@ export function ModelCatalogMenu({
           trailing block it has always rendered. */}
       <DropdownMenuSeparator className="mx-0" />
       {footer}
-      <DropdownMenuCheckboxItem
-        checked={showFullIds}
-        className={cn(dropdownMenuRow, 'text-(--ui-text-tertiary)')}
-        onSelect={event => {
-          // Keep the menu open: flipping the label is a view mode, not a pick.
-          event.preventDefault()
-          setShowFullModelIds(!showFullIds)
-        }}
-      >
-        <Codicon name="symbol-string" size="0.75rem" />
-        {copy.showFullIds}
-      </DropdownMenuCheckboxItem>
       <DropdownMenuItem
         className={cn(dropdownMenuRow, 'text-(--ui-text-tertiary)', slugEntry && 'text-foreground')}
         onSelect={event => {
@@ -1002,14 +1006,13 @@ interface ModelFamilyRowProps {
   onSubOpenChange?: (open: boolean, key: string) => void
   provider: ModelOptionProvider
   search: string
-  /** Raw `provider/model` id instead of the prettified name (user toggle). */
-  showFullId?: boolean
 }
 
 /** One model family row: the favorite star, the trigger that commits the
  *  model, plus the hover-revealed options submenu. Shared by the Favorites
  *  section and the provider groups, so the two can never paint a model
  *  differently. */
+// health: allow CC -- usage-window plans: the Large/Free tag replaces the price on tagged rows; this row was over target on main
 function ModelFamilyRow({
   controller,
   current,
@@ -1021,8 +1024,7 @@ function ModelFamilyRow({
   onSelect,
   onSubOpenChange,
   provider,
-  search,
-  showFullId = false
+  search
 }: ModelFamilyRowProps): ReactElement {
   const { t } = useI18n()
   const copy = t.shell.modelMenu
@@ -1041,12 +1043,8 @@ function ModelFamilyRow({
       : null
 
   const isCurrent = activeId !== null
-  // Raw `provider/model` id the backend would send on the wire (user toggle);
-  // the prettified name stays the default everywhere else.
-  const fullId = `${provider.slug}:${family.id}`
   const { name, tag } = modelDisplayParts(family.id)
-  const rowName = showFullId ? family.id : name
-  const decoration = useModelMenuRowDecoration({ label: rowName, model: family.id, provider: provider.slug })
+  const decoration = useModelMenuRowDecoration({ label: name, model: family.id, provider: provider.slug })
   const caps = provider.capabilities?.[family.id]
   const limit = familyLimit(provider, family, isCurrent)
 
@@ -1054,6 +1052,9 @@ function ModelFamilyRow({
   // it). A `-fast` sibling shares the base id's price: the collapsed row
   // fronts the base, so fall back to it when only the fast variant is unpriced.
   const pricing = provider.pricing?.[family.id] ?? (family.fastId ? provider.pricing?.[family.fastId] : undefined)
+
+  // Window plans: no price (the plan covers it); the tag shows only for Large / Free.
+  const rowLevel = usageLevel(provider, family.id)
 
   // Managed local model loading into memory right now: real load percent,
   // keyed by exact model id (remote providers never collide with GGUF stems).
@@ -1161,17 +1162,10 @@ function ModelFamilyRow({
         </Tip>
         <span className={cn('flex min-w-0 flex-1 items-center gap-1.5', limit.tone)}>
           {decoration.icon !== undefined ? <ModelMenuRowIcon icon={decoration.icon} /> : null}
-          <span
-            className={cn('hover-marquee min-w-0 truncate', showFullId && 'font-mono text-xs')}
-            onPointerEnter={armMarquee}
-            onPointerLeave={disarmMarquee}
-            title={showFullId ? fullId : undefined}
-          >
-            <span className="hover-marquee-inner">
-              <HighlightMatches foldSeparators query={search} text={showFullId ? family.id : name} />
-            </span>
+          <span className="min-w-0 truncate">
+            <HighlightMatches foldSeparators query={search} text={name} />
           </span>
-          {!showFullId && tag ? <ModelChip>{tag}</ModelChip> : null}
+          {tag ? <ModelChip>{tag}</ModelChip> : null}
           {decoration.badge ? (
             <Badge className="shrink-0 uppercase tracking-wide" data-model-menu-row-badge="" size="xs" variant="muted">
               {decoration.badge}
@@ -1190,7 +1184,8 @@ function ModelFamilyRow({
             <span className="text-[0.62rem] tabular-nums text-(--ui-text-tertiary)">{loadProgress.percent}%</span>
           </span>
         ) : null}
-        {showPricing && pricing ? <ModelPrice pricing={pricing} /> : null}
+        {showPricing && pricing && !rowLevel ? <ModelPrice pricing={pricing} /> : null}
+        {rowLevel ? <UsageLevelTag level={usageTag(provider, family.id)} /> : null}
         {settings.map(setting => (
           <ModelChip key={setting} setting>
             {setting}
@@ -1262,7 +1257,8 @@ function familyLimit(
 ): { reset: null | string; tone?: string } {
   const ms = modelResetMs(provider, family.id) ?? (family.fastId ? modelResetMs(provider, family.fastId) : null)
   const reset = ms === null ? null : formatReset(ms)
-  const dim = !isCurrent && (reset !== null || accountResetMs(provider) !== null)
+  // Window plans: a model a full allowance stops dims too; the limit line under the provider says why.
+  const dim = !isCurrent && (reset !== null || accountResetMs(provider) !== null || planBlocks(provider, family.id))
 
   return { reset, tone: dim ? 'text-(--ui-text-tertiary)' : undefined }
 }
@@ -1375,7 +1371,7 @@ function groupModels(
       current.model &&
       !allFamilies.some(family => family.id === current.model || family.fastId === current.model)
     ) {
-      allFamilies = [{ fastId: null, id: current.model }, ...allFamilies]
+      allFamilies = recommendedFirst(provider, [{ fastId: null, id: current.model }, ...allFamilies])
     }
 
     if (allFamilies.length === 0) {
@@ -1427,6 +1423,59 @@ function groupModels(
   groups.sort((a, b) => a.provider.name.localeCompare(b.provider.name))
 
   return groups
+}
+
+// The Nous row: the only one the menu re-reads on open or while its pricing warms (window-plan labels).
+function isNous(provider: ModelOptionProvider): boolean {
+  return provider.slug === 'nous'
+}
+
+// Nous only: re-read on every open (cached list shows instantly, the re-read swaps in when it
+// lands). The plan (usage-window labels, used-up notes) loads with the first turn, after the
+// list was first fetched at boot, so the 60s cache would hide it until "Refresh models".
+// A cheap local cache-only read (the plan may not be known yet, so any Nous row); every other
+// provider keeps the 60s cache.
+function nousRefetchOnMount(data: ModelOptionsResult | undefined): 'always' | true {
+  return data?.providers?.some(isNous) ? 'always' : true
+}
+
+// A cache-only open on a fresh backend ships rows marked pending while pricing warms in the
+// background; re-read a few times so window-plan labels appear without "Refresh models".
+// Bounded (~10s): a failed pricing fetch can leave rows pending, and an open menu must not
+// poll forever. Only runs while the menu is mounted and a row is pending.
+function nousPricingPoll(data: ModelOptionsResult | undefined, updates: number): false | number {
+  return updates < 6 && data?.providers?.some(p => isNous(p) && p.pricing_pending) ? 2_000 : false
+}
+
+// Window plans: the plan's featured picks lead (the backend lists them first). Re-applied after the
+// current-model pin above, so a pinned custom model lands under "Other models" instead of taking the
+// first pick's "Recommended" heading.
+function recommendedFirst(provider: ModelOptionProvider, families: ModelFamily[]): ModelFamily[] {
+  const split = splitRecommended(provider, families.map(family => family.id))
+
+  if (!split) {
+    return families
+  }
+
+  const byId = new Map(families.map(family => [family.id, family]))
+
+  return [...split.recommended, ...split.other].flatMap(id => byId.get(id) ?? [])
+}
+
+// Window plans, no query: "Recommended" above the first of the plan's featured families and
+// "Other models" above the first family after them. The backend already lists the picks first.
+function sectionTitle(
+  group: ProviderGroup,
+  familyIdx: number,
+  words: { sectionOther: string; sectionRecommended: string }
+): null | string {
+  const section = sectionAt(
+    group.provider,
+    group.families.map(family => family.id),
+    familyIdx
+  )
+
+  return section === 'recommended' ? words.sectionRecommended : section === 'other' ? words.sectionOther : null
 }
 
 // Small hooks kept at the bottom so the component reads top-down.

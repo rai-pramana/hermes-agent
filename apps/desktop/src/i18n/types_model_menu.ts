@@ -6,7 +6,6 @@ export interface ModelMenuTranslations {
   editModels: string
   followDefault: string
   refreshModels: string
-  showFullIds: string
   favorites: string
   addFavorite: string
   removeFavorite: string
