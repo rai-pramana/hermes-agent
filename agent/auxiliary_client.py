@@ -1719,6 +1719,16 @@ class _AnthropicCompletionsAdapter:
             max_tokens = None
         else:
             max_tokens = kwargs.get("max_tokens") or kwargs.get("max_completion_tokens")
+            if not max_tokens:
+                try:
+                    _chars = sum(len(str(m.get("content", "")) if isinstance(m.get("content"), str) else sum(
+                        (len(str(b.get("text", ""))) for b in m.get("content", []) if isinstance(b, dict)), 0))
+                        for m in (kwargs.get("messages", []) or []))
+                    for _t in (kwargs.get("tools", []) or []):
+                        _chars += len(str(_t))
+                    max_tokens = max(512, min(8192, _chars // 4))
+                except Exception:
+                    max_tokens = 1024
         temperature = kwargs.get("temperature")
         # Reasoning priority: explicit per-call _reasoning_config (MoA per-slot) wins over
         # extra_body.reasoning; build_anthropic_kwargs translates to ``thinking``.

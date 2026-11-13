@@ -52,14 +52,32 @@ def _verify_on_stop_nudge(agent) -> Optional[str]:
 
 def _pre_verify_nudge(agent, final_response, attempt: int) -> Optional[str]:
     """After code edits a registered ``pre_verify`` hook may keep the agent going one
-    more turn; no default continuation cost."""
+    more turn; no default continuation cost.
+
+    ``agent.pre_verify_without_edits`` (default false) also offers the hook a turn that edited
+    nothing. The default gate — "only after code edits" — silently skipped an entire class of
+    stop: a turn that debugged through terminal tools, narrated its next step and yielded. It
+    measured 0 of 13 would-nudge turns carrying a file write, so the hook could never fire for
+    them. Opting in keeps the default turn cost unchanged; the hook itself still decides from
+    ``final_response`` and may return nothing.
+    """
     _edited = sorted(getattr(agent, "_turn_file_mutation_paths", set()) or [])
+    # Read the opt-in lazily from config, the same way `_resolved_is_coding` is resolved below,
+    # so no init change is needed and an unset key keeps the old behaviour.
+    _may_run = bool(_edited)
+    if not _may_run:
+        try:
+            from hermes_cli.config import load_config_readonly
+            _agent_cfg = (load_config_readonly() or {}).get("agent") or {}
+            _may_run = bool(_agent_cfg.get("pre_verify_without_edits"))
+        except Exception:
+            _may_run = False
     try:
         from agent.verify_hooks import max_verify_nudges
         from hermes_cli.lifecycle import has_hook
         from hermes_cli.plugins import get_pre_verify_continue_message
 
-        if _edited and has_hook("pre_verify") and attempt < max_verify_nudges():
+        if _may_run and has_hook("pre_verify") and attempt < max_verify_nudges():
             # Posture is fixed for the session — resolve once + cache.
             coding = getattr(agent, "_resolved_is_coding", None)
             if coding is None:
