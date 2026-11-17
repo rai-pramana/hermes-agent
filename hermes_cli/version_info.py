@@ -61,9 +61,10 @@ def _derived_version(
 
 def _run_git(repo_dir: Path, *args: str) -> str | None:
     try:
+        from hermes_cli._subprocess_compat import windows_hide_flags
         result = subprocess.run(
             ["git", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3, cwd=str(repo_dir),
-            check=False,
+            check=False, creationflags=windows_hide_flags(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
