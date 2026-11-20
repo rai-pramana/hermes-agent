@@ -144,8 +144,21 @@ export function ModelPill({
   // Raw id (`provider/model`) instead of the prettified name — same toggle as
   // the catalog rows, so the pill never disagrees with the menu.
   const coreLabel = showFullIds
-    ? currentModel.trim() || formatModelPillLabel(currentModel, { fastMode, serviceTier })
-    : formatModelPillLabel(currentModel, { fastMode, serviceTier })
+    ? currentModel.trim() ||
+      formatModelPillLabel(currentModel, {
+        fastMode,
+        requireCapabilities: !runtimeId,
+        serviceTier,
+        supportsFast: model.supportsFast,
+        supportsUltrafast: model.supportsUltrafast
+      })
+    : formatModelPillLabel(currentModel, {
+        fastMode,
+        requireCapabilities: !runtimeId,
+        serviceTier,
+        supportsFast: model.supportsFast,
+        supportsUltrafast: model.supportsUltrafast
+      })
 
   const label = compact ? (
     <ChevronDown className="size-3.5 shrink-0 opacity-70" />
